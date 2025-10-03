@@ -1,38 +1,45 @@
 import { useState } from "react";
+
+// IMPORTANT: set this in Vercel → Project → Settings → Environment Variables
+// VITE_BACKEND_URL = https://<your-railway>.up.railway.app
 const BACKEND = import.meta.env.VITE_BACKEND_URL;
 
 export default function App() {
-  const [tab, setTab] = useState("invoices"); // "invoices" | "stock"
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [downloadToken, setDownloadToken] = useState("");
+  const [shareUrl, setShareUrl] = useState("");
 
-  // options
-  const [fmt, setFmt] = useState("csv");
-  const [fuzzy, setFuzzy] = useState(90);
-  const [dropDupes, setDropDupes] = useState(true);
-  const [dropNeg, setDropNeg] = useState(false);
-  const [flagDue, setFlagDue] = useState(true);
-  const [daysExp, setDaysExp] = useState(30);
-
-  const endpoint =
-    tab === "invoices"
-      ? `${BACKEND}/api/invoices/clean?fmt=${fmt}&fuzzy=${fuzzy}&drop_dupes=${dropDupes}&drop_negative_qty=${dropNeg}&flag_due_issue=${flagDue}`
-      : `${BACKEND}/api/stock/clean?fmt=${fmt}&days_expiring=${daysExp}&drop_negative_qty=${dropNeg}`;
-
-  const doClean = async () => {
+  const clean = async () => {
     try {
       setBusy(true);
-      setError(""); setResult(null);
-      if (!file) throw new Error("Select a file first.");
+      setError("");
+      setDownloadToken("");
+      setShareUrl("");
+
+      if (!file) throw new Error("Please choose a CSV or XLSX file first.");
 
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(endpoint, { method: "POST", body: fd });
+
+      // This matches your previous backend endpoint & defaults
+      const url =
+        `${BACKEND}/api/clean?` +
+        new URLSearchParams({
+          fmt: "csv",
+          fuzzy: "90",
+          drop_dupes: "true",
+          drop_negative_qty: "false",
+          flag_due_issue: "true",
+        }).toString();
+
+      const res = await fetch(url, { method: "POST", body: fd });
       if (!res.ok) throw new Error(await res.text());
+
       const json = await res.json();
-      setResult(json);
+      setDownloadToken(json.download_token || "");
+      setShareUrl(json.share_url ? `${BACKEND}${json.share_url}` : "");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -40,90 +47,78 @@ export default function App() {
     }
   };
 
-  const openDownload = () => {
-    if (!result?.download_token) return;
-    window.open(`${BACKEND}/api/download/${result.download_token}`, "_blank");
-  };
-
-  const openShare = () => {
-    if (!result?.download_token) return;
-    window.open(`${BACKEND}${result.share_url}`, "_blank");
-  };
-
-  const sample = () => {
-    const url = tab === "invoices" ? `${BACKEND}/api/sample/invoices` : `${BACKEND}/api/sample/stock`;
-    window.open(url, "_blank");
-  };
-
   return (
-    <div style={{ maxWidth: 920, margin: "40px auto", color: "#ddd", fontFamily: "Inter, system-ui" }}>
-      <h1 style={{ fontSize: 48 }}>AI in a Box — Demo</h1>
-      <p>Upload a CSV/XLSX, tweak options, download/share the cleaned file.</p>
+    <div style={styles.page}>
+      <div style={styles.wrap}>
+        <h1 style={styles.h1}>AI in a Box — Demo</h1>
+        <p style={styles.sub}>Upload a CSV/XLSX — backend will “clean” and give a download link.</p>
 
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 12, margin: "20px 0" }}>
-        <button onClick={() => setTab("invoices")} style={{ padding: "8px 14px", background: tab==="invoices" ? "#333":"#111" }}>Invoices</button>
-        <button onClick={() => setTab("stock")} style={{ padding: "8px 14px", background: tab==="stock" ? "#333":"#111" }}>Stock</button>
-        <button onClick={sample} style={{ marginLeft: "auto" }}>Use sample {tab}</button>
-      </div>
-
-      {/* Options */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 14 }}>
-        <div>
-          <label>Export format</label><br/>
-          <select value={fmt} onChange={e=>setFmt(e.target.value)}>
-            <option value="csv">CSV</option>
-            <option value="xlsx">XLSX</option>
-          </select>
+        <div style={styles.row}>
+          <input
+            type="file"
+            accept=".csv,.xlsx"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+          />
+          <button style={styles.btn} onClick={clean} disabled={busy || !file}>
+            {busy ? "Cleaning…" : "Clean"}
+          </button>
         </div>
-        {tab==="invoices" && (
-          <>
-            <div>
-              <label>Fuzzy match</label><br/>
-              <input type="number" value={fuzzy} onChange={e=>setFuzzy(Number(e.target.value))}/>
-            </div>
-            <div>
-              <label><input type="checkbox" checked={dropDupes} onChange={e=>setDropDupes(e.target.checked)}/> Drop duplicates</label>
-              <br/>
-              <label><input type="checkbox" checked={flagDue} onChange={e=>setFlagDue(e.target.checked)}/> Flag due before issue</label>
-            </div>
-          </>
-        )}
-        {tab==="stock" && (
-          <>
-            <div>
-              <label>Days expiring</label><br/>
-              <input type="number" value={daysExp} onChange={e=>setDaysExp(Number(e.target.value))}/>
-            </div>
-          </>
-        )}
-        <div>
-          <label><input type="checkbox" checked={dropNeg} onChange={e=>setDropNeg(e.target.checked)}/> Drop negative qty</label>
-        </div>
-      </div>
 
-      {/* Upload */}
-      <div style={{ display: "flex", gap: 12, margin: "12px 0" }}>
-        <input type="file" accept=".csv,.xlsx" onChange={e=>setFile(e.target.files?.[0] || null)} />
-        <button disabled={!file || busy} onClick={doClean}>{busy ? "Working..." : "Clean"}</button>
-        {result?.download_token && (
-          <>
-            <button onClick={openDownload}>Download</button>
-            <button onClick={openShare}>Open share link</button>
-          </>
+        {error && <p style={styles.err}>Error: {error}</p>}
+
+        {downloadToken && (
+          <div style={{ marginTop: 20 }}>
+            <a
+              style={styles.linkBtn}
+              href={`${BACKEND}/api/download/${downloadToken}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Download
+            </a>
+            {shareUrl && (
+              <a
+                style={{ ...styles.linkBtn, marginLeft: 12 }}
+                href={shareUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open share link
+              </a>
+            )}
+          </div>
         )}
       </div>
-
-      {error && <p style={{ color:"crimson" }}>Error: {error}</p>}
-
-      {result && (
-        <>
-          <h3>Summary</h3>
-          <pre style={{ background:"#111", padding:12 }}>
-{JSON.stringify(result.summary, null, 2)}
-          </pre>
-        </>
-      )}
     </div>
   );
 }
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "#222",
+    color: "#eee",
+    fontFamily: "system-ui, Segoe UI, Inter, sans-serif",
+  },
+  wrap: { maxWidth: 900, margin: "60px auto", padding: "0 20px" },
+  h1: { fontSize: 56, margin: "0 0 18px" },
+  sub: { opacity: 0.85, margin: "0 0 24px" },
+  row: { display: "flex", gap: 12, alignItems: "center" },
+  btn: {
+    background: "#1f6feb",
+    border: "none",
+    color: "#fff",
+    padding: "10px 18px",
+    borderRadius: 6,
+    cursor: "pointer",
+  },
+  linkBtn: {
+    display: "inline-block",
+    background: "#444",
+    color: "#fff",
+    padding: "8px 14px",
+    borderRadius: 6,
+    textDecoration: "none",
+  },
+  err: { color: "crimson", marginTop: 16 },
+};
